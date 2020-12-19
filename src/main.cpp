@@ -163,7 +163,6 @@ void readFromSerial(void *some){
     // Serial.println("Delay");
     vTaskDelay(100/portTICK_PERIOD_MS);
   }
-  Serial.println("Aici");
   vTaskDelete(NULL);
 }
 
@@ -234,11 +233,21 @@ void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
   Serial.println(qos);
 }
 
+void setTemperature(int id, char *temp){
+  tempSet[id]=atof(temp);;
+  mqttdata mydata;
+  sprintf(mydata.topic,"floor2/%d/temp/state",id);
+  strcpy(mydata.sentData,temp);
+  xQueueSend(mqttData,(void *) &mydata, (TickType_t) 1000);
+}
+
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total){
   Serial.printf("Topic: %s\t\t message: %s\n",topic,payload);
-
-  // int id = atoi(getId(topic));
-  // setTemperature(id,payload);
+  char * buff;
+  buff = strtok(topic,"/");
+  buff = strtok(NULL,"/");
+  int id = atoi(buff);
+  setTemperature(id,payload);
 }
 
 void set_defaults(void * some){
