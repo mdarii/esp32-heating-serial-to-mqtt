@@ -46,26 +46,17 @@ struct mqttdata{
   char sentData[20];
 };
 
-void sendData(data data){
-  const char *testing="lalala/%s/lalala";
-  char tempTopic[100];
-  char batTopic[100];
-  char idTopic[100];
-  char temp[10];
-  char bat[10];
-  char id[10];
-  char test[100];
-  dtostrf(data.temp,5, 2, temp);
-  dtostrf(data.voltage,4, 2, bat);
-  sprintf(id,"%d",data.id);
-  sprintf(tempTopic,"floor2/%s/temp/current",id);
-  sprintf(batTopic,"floor2/%s/bat/state",id);
-  sprintf(idTopic,"floor2/%s/id",data.mac);
-  sprintf(test,testing,id);
-  Serial.printf("\n\nIa aici: %s\n\n",test);
-  mqttClient.publish(tempTopic, 0, true, temp);
-  mqttClient.publish(batTopic, 0, true, bat);
-  mqttClient.publish(idTopic, 0, true, id);
+void sendData(void *some){
+  while(1){
+    mqttdata mydata;
+    if(xQueueReceive( mqttData, &( mydata ), ( TickType_t ) 100 )){
+      mqttClient.publish(mydata.topic, 2, true, mydata.sentData);
+    } else {
+      vTaskDelay(500/portTICK_PERIOD_MS);
+    }
+  }
+  // const char *testing="lalala/%s/lalala";
+  // sprintf(test,testing,id);
 }
 
 void checkTemp(void *some){
@@ -103,30 +94,34 @@ void extractData(void *some){
   char in[80];
   data lala;
   char * strtokIndx;
+  mqttdata asensorData;
   if( xQueueReceive( serialData, &( in ), ( TickType_t ) 100 ) )
   {
-    Serial.println("got data");
-    Serial.println(in);
-  strtokIndx = strtok(in,";");
-  lala.id = atoi(strtokIndx);
-  strtokIndx = strtok(NULL,";");
-  strcpy(lala.mac,strtokIndx);
-  strtokIndx = strtok(NULL,";");
-  lala.temp=atof(strtokIndx);
-  strtokIndx = strtok(NULL,";");
-  lala.voltage=atof(strtokIndx);
-  Serial.printf("ID:%d\nMAC:%s\nTEMP:%f\nVoltage:%f\n",lala.id,lala.mac,lala.temp,lala.voltage);
-  sendData(lala);
-  xQueueSend(tempData,(void *) &lala, ( TickType_t ) 1000);
-  // checkTemp(lala.id,lala.temp);
+    strtokIndx = strtok(in,";");
+    lala.id = atoi(strtokIndx);
+    strtokIndx = strtok(NULL,";");
+    strcpy(lala.mac,strtokIndx);
+    strtokIndx = strtok(NULL,";");
+    lala.temp=atof(strtokIndx);
+    strtokIndx = strtok(NULL,";");
+    lala.voltage=atof(strtokIndx);
+    Serial.printf("ID:%d\nMAC:%s\nTEMP:%f\nVoltage:%f\n",lala.id,lala.mac,lala.temp,lala.voltage);
+    xQueueSend(tempData,(void *) &lala, ( TickType_t ) 1000);
+    sprintf(asensorData.topic,"floor2/%d/temp/current",lala.id);
+    sprintf(asensorData.sentData,"%f",lala.temp);
+    xQueueSend(mqttData,(void *) &asensorData, (TickType_t) 1000);
+    sprintf(asensorData.topic,"floor2/%d/bat/state",lala.id);
+    sprintf(asensorData.sentData,"%f",lala.voltage);
+    xQueueSend(mqttData,(void *) &asensorData, (TickType_t) 1000);
+    sprintf(asensorData.topic,"floor2/%d/mac",lala.id);
+    strcpy(asensorData.sentData,lala.mac);
+    xQueueSend(mqttData,(void *) &asensorData, (TickType_t) 1000);
   }
   vTaskDelay(1000/portTICK_PERIOD_MS);
   }
 }
 
 void readFromSerial(void *some){
-  int pos=0;
-  char buff[30];
    for( ;; ){
     while (Serial2.available() > 0){
       char inChar = Serial2.read();
@@ -257,13 +252,14 @@ void set_defaults(void * some){
 void setup() {
   serialData = xQueueCreate(10,sizeof(inData));
   tempData = xQueueCreate(10,sizeof(data));
-  mqttData = xQueueCreate(20,sizeof(mqttdata));
+  mqttData = xQueueCreate(40,sizeof(mqttdata));
   Serial.begin(9600);
   Serial2.begin(9600);
   xTaskCreate(set_defaults, "set defaults", 1000, NULL, 1, NULL);
   xTaskCreate(readFromSerial,"Read from Serial2", 2048, NULL, 1, NULL);
   xTaskCreate(extractData,"Parse Serial", 4096, NULL, 1, NULL);
   xTaskCreate(checkTemp,"Check temp",2048,NULL,1,NULL);
+  xTaskCreate(sendData,"Send MQTT data",1024,NULL,1,NULL);
   mqttReconnectTimer = xTimerCreate("mqttTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToMqtt));
   wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, reinterpret_cast<TimerCallbackFunction_t>(connectToWifi));
 
